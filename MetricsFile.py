@@ -1,3 +1,8 @@
+import numpy as np
+from sklearn.metrics import roc_auc_score
+from statsmodels.stats.proportion import proportion_confint
+
+
 class Metrics():
     def __init__(self):
         self.true_pos = 0
@@ -31,9 +36,10 @@ class Metrics():
         s = self.summary()
         for key in s: print(key + ": ", s[key])
 
-    def print_one_liner(self, phase):
+    def print_one_liner(self, phase, condition):
         s = self.summary()
-        print('{} Acc: {:.4f}, {} Loss: {:.4f}, {} Sens: {:.4f}, {} Spec: {:.4f}'.format(phase, s["Model Accuracy"], phase, s["Model Loss"], phase, s["Model Sensitivity"], phase, s["Model Specificity"]))
+	if condition == True: 
+            print('{} Acc: {:.4f}, {} Loss: {:.4f}, {} Sens: {:.4f}, {} Spec: {:.4f}'.format(phase, s["Model Accuracy"], phase, s["Model Loss"], phase, s["Model Sensitivity"], phase, s["Model Specificity"]))
         return s
 
     def accuracy(self, true_pos, true_neg, false_pos, false_neg):
@@ -61,7 +67,14 @@ class Metrics():
             return 0
         return (2 * true_pos) / (2 * true_pos + false_pos + false_neg)
 
+    def auc(self, labels, preds):
+        return roc_auc_score(labels, preds)
 
+    def ci(self, labels, preds):
+        # Measures the 95% Confidence Interval of the accumulated predictions
+        correct = len(labels) - sum(abs(np.array(labels) - np.array(preds)))
+        lower, upper = proportion_confint(correct, len(labels), 0.05)
+        return f'{lower:.4} - {upper:.4}'
 
 
 
