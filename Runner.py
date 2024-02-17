@@ -28,21 +28,29 @@ def seed_everything(seed):
 
 def main():
     seed_everything(123)
-    
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     batch_size = 16
     img_size = (224, 224)
     # data_mean_overall = [0.1565, 0.1488, 0.1424]
     # data_std_overall = [0.1438, 0.1412, 0.1361]
     dataset_file = '/home/Projects/TNI_Knees_RD_with_Gender/TNI_Knees_RD_with_Gender/knee_gender_labels.csv'
-    weights_paths = ['/home/Projects/WeightsGenderClass/', '/home/Projects/WeightsRecessDist/']
-    report_paths = ['/home/Projects/ReportsGenderClass/', '/home/Projects/ReportsRecessDist/']
-    epochs = 30
-    fraction_sample = 0.05  # Altered Dataset Sample Size = 20000 * fraction_sample
     save_criteria = 'Accuracy'
-    classification_systems = ['GenderClassification', 'RecessDistension']
-    saliency_img_directories = ['/home/Projects/SaliencyMapsGenderClass/', '/home/Projects/SaliencyMapsRecessDist/']
     plot_directory = '/home/Projects/'
+    # classification_systems = ['RecessDistension', 'SexClassification']
+    classification_systems = ['SexClassification']
+    if classification_systems[0] == 'SexClassification':
+        weights_paths = ['/home/Projects/WeightsSexClass/', '/home/Projects/WeightsRecessDist/']
+        report_paths = ['/home/Projects/ReportsSexClass/', '/home/Projects/ReportsRecessDist/']
+        saliency_img_directories = ['/home/Projects/SaliencyMapsSexClass/', '/home/Projects/SaliencyMapsRecessDist/']
+        gradcam_img_directories = ['/home/Projects/GradCamMapsSexClass/']
+    elif classification_systems[0] == 'RecessDistension':
+        weights_paths = ['/home/Projects/WeightsRecessDist/', '/home/Projects/WeightsSexClass/']
+        report_paths = ['/home/Projects/ReportsRecessDist/', '/home/Projects/ReportsSexClass/']
+        saliency_img_directories = ['/home/Projects/SaliencyMapsRecessDist/', '/home/Projects/SaliencyMapsSexClass/']
+    epochs = 30
+    # epochs = 2
+    dataset_limit = 1000
 
     for i in range(len(classification_systems)):
         print('Part: {}'.format(classification_systems[i]))
@@ -51,35 +59,30 @@ def main():
         model = EfficientNetModelImport()
 
         if i == 0:
-            idsX_train, idsX_val, idsX_test, labelsY_train, labelsY_val, labelsY_test, images_global, ids_global = dataset_split(dataset_file, classification_systems[i], i, fraction_sample)
-            idsX_train = idsX_train.to_numpy(); idsX_val = idsX_val.to_numpy(); idsX_test = idsX_test.to_numpy()
-            labelsY_train = labelsY_train.to_numpy(); labelsY_val = labelsY_val.to_numpy(); labelsY_test = labelsY_test.to_numpy()
+            idsX_train, idsX_test, labelsY_train, labelsY_test, images_global, ids_global = dataset_split(dataset_file, classification_systems[i], i, dataset_limit)
 
-            train_loader = get_dataloader(idsX_train, labelsY_train, img_size, batch_size, data_split='Training', shuffle=True)
-            val_loader = get_dataloader(idsX_val, labelsY_val, img_size, batch_size, data_split='Validation', shuffle=False)
+            train_loader = get_dataloader(idsX_train, labelsY_train, img_size, batch_size, data_split='Training', shuffle=False)
             test_loader = get_dataloader(idsX_test, labelsY_test, img_size, batch_size, data_split='Testing', shuffle=False)
 
             images1_global = images_global
             ids1_global = ids_global
 
         else:
-            idsX_train, idsX_val, idsX_test, labelsY_train, labelsY_val, labelsY_test, images_global, ids_global = dataset_split(dataset_file, classification_systems[i], i, fraction_sample, images1_global, ids1_global)
-            idsX_train = idsX_train.to_numpy(); idsX_val = idsX_val.to_numpy(); idsX_test = idsX_test.to_numpy()
-            labelsY_train = labelsY_train.to_numpy(); labelsY_val = labelsY_val.to_numpy(); labelsY_test = labelsY_test.to_numpy()
+            idsX_train, idsX_test, labelsY_train, labelsY_test, images_global, ids_global = dataset_split(dataset_file, classification_systems[i], i, dataset_limit, images1_global, ids1_global)
 
             train_loader = get_dataloader(idsX_train, labelsY_train, img_size, batch_size, data_split='Training', shuffle=True)
-            val_loader = get_dataloader(idsX_val, labelsY_val, img_size, batch_size, data_split='Validation', shuffle=False)
             test_loader = get_dataloader(idsX_test, labelsY_test, img_size, batch_size, data_split='Testing', shuffle=False)
 
         # Training and Validation
         criterion = nn.CrossEntropyLoss()
         optimizer = torch.optim.SGD(model.parameters(), lr=0.005, momentum=0.9)
         pathlib.Path(weights_paths[i]).mkdir(parents=True, exist_ok=True)
-        train_validate(model, train_loader, val_loader, optimizer, criterion, device, epochs, save_criteria, weights_paths[i], classification_systems[i], plot_directory)
+        train_validate(model, train_loader, batch_size, optimizer, criterion, device, epochs, save_criteria, weights_paths[i], classification_systems[i], plot_directory)
 
         # Testing
         weights_files_list = glob.glob(weights_paths[i] + '/*pth')
         weights_file = max(weights_files_list, key=os.path.getctime)
+	print(weights_file)
         checkpoint = torch.load(weights_file)
         model.load_state_dict(checkpoint['model_state_dict'])
 
@@ -87,7 +90,7 @@ def main():
 
         pathlib.Path(report_paths[i]).mkdir(parents=True, exist_ok=True)
 
-        test_report(model, test_loader, criterion, device, report_paths[i], classification_systems[i], saliency_img_directories[i])
+        test_report(model, test_loader, criterion, device, report_paths[i], batch_size, classification_systems[i], gradcam_img_directories[i])
 
 
 if __name__ == "__main__":
