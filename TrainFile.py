@@ -1,17 +1,45 @@
 import numpy as np
 import torch
+import torch.nn as nn
 from barbar import Bar
 from MetricsFile import Metrics
 import tensorflow as tf
 import matplotlib.pyplot as plt
+from torch.utils.data import DataLoader
 
 
-def train(model, dataloader, optimizer, criterion, device):
+def train_validate_model(model, dataloader, batch_size, optimizer, criterion, device, epoch_number, cross_val_count):
     model.to(device)
-    model.train()
-    metrics = Metrics()
+    metrics_train = Metrics()
+    metrics_valid = Metrics()
+    temp_train_dataset = []
+    temp_valid_dataset = []
+    if cross_val_count is None:
+        cross_val_count = 0
+    k_fold_number = 4
 
-    for (id_imgs, inputs, labels) in Bar(dataloader):
+    fold_train_indices, fold_val_indices = k_fold_indices(dataloader.dataset, k_fold_number)
+
+    if cross_val_count >= k_fold_number:
+        cross_val_count = 0
+
+    for i in range(len(dataloader.dataset)):
+        if i in fold_train_indices[cross_val_count]:
+            temp_train_dataset.append(dataloader.dataset[i])
+
+    for i in range(len(dataloader.dataset)):
+        if i in fold_val_indices[cross_val_count]:
+            temp_valid_dataset.append(dataloader.dataset[i])
+
+    cross_val_count += 1
+
+    train_dataloader = DataLoader(dataset=temp_train_dataset, batch_size=batch_size, shuffle=True)
+    valid_dataloader = DataLoader(dataset=temp_valid_dataset, batch_size=batch_size, shuffle=False)
+
+    # Training
+    model.train()
+
+    for (id_imgs, inputs, labels) in Bar(train_dataloader):
         optimizer.zero_grad()
 
         inputs = inputs.to(device)
@@ -23,17 +51,14 @@ def train(model, dataloader, optimizer, criterion, device):
         optimizer.step()
 
         _, predicted = torch.max(outputs.data, 1)
-        metrics.batch(labels=labels, preds=predicted, loss=loss.item())
-    return metrics.print_one_liner(phase='Train')
+        metrics_train.batch(labels=labels, preds=predicted, loss=loss.item())
+    metrics_train.print_one_liner(phase='Train', condition=True)
 
-
-def validate(model, dataloader, criterion, device):
-    model.to(device)
+    # Validation
     model.eval()
-    metrics = Metrics()
 
     with torch.no_grad():
-        for (id_imgs, inputs, labels) in Bar(dataloader):
+        for (id_imgs, inputs, labels) in Bar(valid_dataloader):
             inputs = inputs.to(device)
             labels = labels.to(device)
 
@@ -41,11 +66,13 @@ def validate(model, dataloader, criterion, device):
             loss = criterion(outputs, labels)
 
             _, predicted = torch.max(outputs.data, 1)
-            metrics.batch(labels=labels, preds=predicted, loss=loss.item())
-    return metrics.print_one_liner(phase='Val')
+            metrics_valid.batch(labels=labels, preds=predicted, loss=loss.item())
+    metrics_valid.print_one_liner(phase='Val', condition=True)
+
+    return metrics_train.print_one_liner(phase='Train', condition=False), metrics_valid.print_one_liner(phase='Val', condition=False), cross_val_count
 
 
-def train_validate(model, train_loader, val_loader, optimizer, criterion, device, epochs, save_criteria, weights_path, classification_system, plot_directory):
+def train_validate(model, train_loader, batch_size, optimizer, criterion, device, epochs, save_criteria, weights_path, classification_system, plot_directory):
     best_criteria = 0
     min_val_loss = np.Inf
     epoch_no_improve = 0
@@ -53,11 +80,12 @@ def train_validate(model, train_loader, val_loader, optimizer, criterion, device
     validation_accuracy_array = []
     train_loss_array = []
     validation_loss_array = []
+    cross_val_count = 0
+    get_last_epoch = epochs
 
     for epoch in range(epochs):
         print("Epoch #{}".format(epoch+1))
-        metrics_train = train(model, train_loader, optimizer, criterion, device)
-        metrics_val = validate(model, val_loader, criterion, device)
+        metrics_train, metrics_val, cross_val_count = train_validate_model(model, train_loader, batch_size, optimizer, criterion, device, epoch, cross_val_count)
 
         temp_train_accuracy = metrics_train['Model Accuracy']
         temp_validation_accuracy = metrics_val['Model Accuracy']
@@ -82,17 +110,19 @@ def train_validate(model, train_loader, val_loader, optimizer, criterion, device
                 'sensitivity': metrics_val['Model Sensitivity'],
                 'specificity': metrics_val['Model Specificity']
             }, '{}weights_epoch_{}_{}_{}.pth'.format(weights_path, epoch, save_criteria, str(best_criteria).replace('.', '_')))
-        '''
         val_loss = metrics_val['Model Loss']
         min_val_loss, epoch_no_improve, condition = EarlyStopping(val_loss, min_val_loss, epoch, epoch_no_improve)
         if condition is True:
+	    get_last_epoch = epoch
+	    PlotAccuracy(epochs, train_accuracy_array, validation_accuracy_array, classification_system, plot_directory)
+    	    PlotLoss(epochs, train_loss_array, validation_loss_array, classification_system, plot_directory)
             break
         else:
             continue
-        '''
 
-    PlotAccuracy(epochs, train_accuracy_array, validation_accuracy_array, classification_system, plot_directory)
-    PlotLoss(epochs, train_loss_array, validation_loss_array, classification_system, plot_directory)
+    if get_last_epoch == epochs: 
+        PlotAccuracy(epochs, train_accuracy_array, validation_accuracy_array, classification_system, plot_directory)
+        PlotLoss(epochs, train_loss_array, validation_loss_array, classification_system, plot_directory)
 
 
 def EarlyStopping(val_loss, min_val_loss, epoch_num, epoch_no_improve):
@@ -124,8 +154,8 @@ def PlotAccuracy(epochs, train_array, validation_array, classification_system, p
     plt.ylim([0.0, 1.0])
     plt.title('Epochs vs Training and Validation Accuracy Chart')
 
-    if classification_system == 'GenderClassification':
-        plot_accuracy_directory1 = plot_accuracy_directory + 'AccuracyChart/AccuracyChartGenderClass.png'
+    if classification_system == 'SexClassification':
+        plot_accuracy_directory1 = plot_accuracy_directory + 'AccuracyChart/AccuracyChartSexClass.png'
     elif classification_system == 'RecessDistension':
         plot_accuracy_directory1 = plot_accuracy_directory + 'AccuracyChart/AccuracyChartRecessDist.png'
     plt.savefig(plot_accuracy_directory1)
@@ -141,14 +171,31 @@ def PlotLoss(epochs, train_loss_array, validation_loss_array, classification_sys
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
     plt.xlim([1, epochs])
-    # plt.ylim([0.0, 1.0])
     plt.title('Epochs vs Training and Validation Loss Chart')
 
-    if classification_system == 'GenderClassification':
-        plot_loss_directory1 = plot_loss_directory + 'LossChart/LossChartGenderClass.png'
+    if classification_system == 'SexClassification':
+        plot_loss_directory1 = plot_loss_directory + 'LossChart/LossChartSexClass.png'
     elif classification_system == 'RecessDistension':
         plot_loss_directory1 = plot_loss_directory + 'LossChart/LossChartRecessDist.png'
     plt.savefig(plot_loss_directory1)
+
+
+def k_fold_indices(data, k_folds):
+    fold_size = len(data) // k_folds
+    indices = np.arange(len(data))
+    folds_train_indices = []
+    folds_valid_indices = []
+    for i in range(k_folds):
+        valid_indices = indices[i*fold_size:(i+1)*fold_size]
+        train_indices = np.concatenate([indices[:i*fold_size], indices[(i+1)*fold_size:]])
+        folds_train_indices.append(train_indices)
+        folds_valid_indices.append(valid_indices)
+    return folds_train_indices, folds_valid_indices
+
+
+
+
+
 
 
 
