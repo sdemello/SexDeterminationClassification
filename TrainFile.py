@@ -113,8 +113,8 @@ def train_validate(model, train_loader, batch_size, optimizer, criterion, device
         val_loss = metrics_val['Model Loss']
         min_val_loss, epoch_no_improve, condition = EarlyStopping(val_loss, min_val_loss, epoch, epoch_no_improve)
         if condition is True:
-	    get_last_epoch = epoch
-	    PlotAccuracy(epochs, train_accuracy_array, validation_accuracy_array, classification_system, plot_directory)
+	    	get_last_epoch = epoch
+	    	PlotAccuracy(epochs, train_accuracy_array, validation_accuracy_array, classification_system, plot_directory)
     	    PlotLoss(epochs, train_loss_array, validation_loss_array, classification_system, plot_directory)
             break
         else:
